@@ -1,2 +1,3 @@
-﻿sql.db
-login.py
+﻿login.py
+*.txt
+*.db

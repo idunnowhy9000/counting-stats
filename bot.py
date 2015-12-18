@@ -12,8 +12,6 @@ SUBREDDIT = 'counting'
 USERAGENT = 'Statistics for /r/counting by idunnowhy9000'
 # List of thread names, you can add or remove threads to track
 THREAD_NAMES = ['main']
-# Check missing number
-MISSINGNO = False
 # Base regex for base 10 threads
 BASE_REGEX = r'^\W*(\d+(\W*\d+)*|\d+)'
 # Thread options
@@ -278,17 +276,6 @@ def replybot():
 				'author': pauthor,
 				'created': datetime.fromtimestamp(pdate)
 			}
-			
-			if MISSINGNO:
-				_max = max(_max, val)
-				_min = min(_min, val)
-		
-		print(_min, _max)
-		if MISSINGNO and _max > -inf and _min < inf:
-			for i in range(_min, _max):
-				if i not in authorsByValues:
-					missing[i] = True
-					del authorsByValues[i]
 		
 		print('Comment proccessed:', len(comments))
 		print('Valid comments:', valid)
@@ -304,9 +291,7 @@ def replybot():
 		
 		sql.commit()
 
-def _contrib():
-	from operator import itemgetter
-
+def contrib():
 	for name in THREAD_NAMES:
 		query = ('SELECT t1.value, t1.author, round(86400*(julianday(t1.time)-julianday(t2.time))) AS diff'
 				' FROM {0} t1, {0} t2'
@@ -367,7 +352,7 @@ def dump():
 		if FILTER:
 			cur.execute('SELECT * FROM `{0}` WHERE {1}(value)'.format(name, FILTER))
 		else:
-			cur.execute('SELECT * FROM `{0}`'.format(name))
+			cur.execute('SELECT * FROM `{}`'.format(name))
 		
 		fn = name + '.txt'
 		table = cur.fetchall()
@@ -375,8 +360,6 @@ def dump():
 		with open(fn, 'w') as file:
 			for row in table:
 				file.write(str(row) + '\n')
-		
-		print('File {} written'.format(fn))
 
 def clean():
 	for name in THREAD_NAMES:
@@ -387,6 +370,27 @@ def clean():
 
 		print('Deleted all comments in', name)
 
+def stats():
+	for name in THREAD_NAMES:
+		if FILTER:
+			cur.execute('SELECT * FROM `stats_{0}` WHERE {1}(value)'.format(name, FILTER))
+		else:
+			cur.execute('SELECT * FROM `stats_{}`'.format(name))
+		
+		table = cur.fetchall()
+		new_table = sorted(table, key=lambda n: n[1], reverse=True)
+		
+		with open('stats.txt', 'w') as file:
+			file.write('Rank|Username|Counts\n'
+				'---|---|---\n')
+			
+			n = 1
+			for row in new_table:
+				file.write(' | '.join([str(n), row[0], str(row[1])]) + '\n')
+				n += 1
+			
+		print('Stats file written.')
+
 def update_stats():
 	for name in THREAD_NAMES:
 		if FILTER:
@@ -396,19 +400,21 @@ def update_stats():
 		
 		table = cur.fetchall()
 		
-		author = row[2]
+		for row in table:
+			author = row[2]
 
-		cur.execute('SELECT * FROM stats_{} WHERE name=?'.format(name), [author])
-		result = cur.fetchone()
-			
-		if result:
-			counts = result[1]
-		else:
-			cur.execute('INSERT INTO stats_{} WHERE name=? VALUES(?, 0)'.format(name), [author])
-			counts = 0
-			
-		print('Updating', author)
-		cur.execute('UPDATE stats_{} SET counts=? WHERE name=?'.format(name), [counts + len(table), author])
+			cur.execute('SELECT * FROM stats_{} WHERE author=?'.format(name), [author])
+			result = cur.fetchone()
+
+			if result:
+				counts = result[1]
+			else:
+				cur.execute('INSERT INTO stats_{} VALUES(?, 0)'.format(name), [author])
+				counts = 0
+				
+			print('Updating', author)
+			cur.execute('UPDATE stats_{} SET counts=? WHERE author=?'.format(name), [counts + 1, author])
+		
 		sql.commit()
 
 def main():
@@ -416,21 +422,20 @@ def main():
 	
 	parser.add_argument('-T', '--threads', help='add or remove threads to track', action='append')
 	parser.add_argument('-F', '--filter', help='set filter threads in database', action='store')
-	parser.add_argument('-M', '--missing', help='check for missing numbers', action='store_true')
 	parser.add_argument('-L', '--limit', help='limit 1000 counts starting from n.', action='store', type=int)
-	parser.add_argument('-Sl', '--search-limit', help='limit thread searches by n length.', action='store', type=int)
 	
 	parser.add_argument('-Cl', '--clean', help='clean threads in database.', action='store_true')
 	parser.add_argument('-C', '--contrib', help='print contributions for threads in database.', action='store_true')
 	parser.add_argument('-D', '--dump', help='dump all threads in database', action='store_true')
 	
+	parser.add_argument('-S', '--stats', help='display stats in database', action='store_true')
+	parser.add_argument('-Su', '--stats-update', help='update stats in database', action='store_true')
+	
 	args = parser.parse_args()
 	
-	global THREAD_NAMES, MISSINGNO, FILTER, LIMIT
+	global THREAD_NAMES, FILTER, LIMIT
 	if args.threads:
 		THREAD_NAMES = args.threads
-	if args.missing:
-		MISSINGNO = True
 	if args.filter:
 		FILTER = args.filter
 	if args.limit:
@@ -440,15 +445,19 @@ def main():
 		# terrible hack i know
 		FILTER = 'L'
 		sql.create_function('L', 1, lambda n: start < int(n) < final)
-	if args.search_limit:
-		LIMIT = args.searchlimit
 	
 	if args.clean:
 		clean()
 	elif args.contrib:
-		_contrib()
+		contrib()
 	elif args.dump:
 		dump()
+	
+	elif args.stats:
+		stats()
+	elif args.stats_update:
+		update_stats()
+
 	else:
 		replybot()
 
