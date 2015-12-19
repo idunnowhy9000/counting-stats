@@ -1,3 +1,4 @@
 ﻿login.py
 *.txt
 *.db
+__pycache__

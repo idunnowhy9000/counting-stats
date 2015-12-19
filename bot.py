@@ -19,7 +19,7 @@ THREAD_OPTIONS = {
 	'main': {
 		'search': 'title:Counting Thread',
 		'regex': BASE_REGEX,
-		'tid': ['3x85wy']
+		'tid': ['3xe8fa']
 	},
 	'alphanumeric': {
 		'search': 'title:Alphanumerics',
@@ -209,8 +209,8 @@ def replybot():
 		authorsByValues = missing = {}
 		duplicates = []
 		
-		key = thread['type']
-		option = THREAD_OPTIONS[key]
+		name = thread['type']
+		option = THREAD_OPTIONS[name]
 		
 		post = thread['thread']
 		comments = post.comments
@@ -287,7 +287,7 @@ def replybot():
 		print('Saving....')
 		for key, value in authorsByValues.items():
 			if type(value) != dict: continue
-			cur.execute('INSERT INTO `{}` VALUES(:pid,:value,:author,:created)'.format(value))
+			cur.execute('INSERT INTO `{}` VALUES(:pid,:value,:author,:created)'.format(name), value)
 		
 		sql.commit()
 
@@ -348,46 +348,48 @@ def contrib():
 			n += 1
 
 def dump():
+	from operator import itemgetter
 	for name in THREAD_NAMES:
-		if FILTER:
-			cur.execute('SELECT * FROM `{0}` WHERE {1}(value)'.format(name, FILTER))
-		else:
-			cur.execute('SELECT * FROM `{}`'.format(name))
+		query = 'SELECT * FROM `{0}`'.format(name)
 		
-		fn = name + '.txt'
+		if FILTER:
+			query += (' WHERE {}(value)'.format(FILTER))
+		
+		query += ' ORDER BY value'
+		cur.execute(query)
+		
+		filename = name + '.txt'
 		table = cur.fetchall()
 		
-		with open(fn, 'w') as file:
+		with open(filename, 'w') as file:
 			for row in table:
 				file.write(str(row) + '\n')
 
 def clean():
 	for name in THREAD_NAMES:
 		if FILTER:
-			cur.execute('SELECT * FROM `{0}` WHERE {1}(value)'.format(name, FILTER))
+			cur.execute('DELETE FROM `{0}` WHERE {1}(value)'.format(name, FILTER))
 		else:
-			cur.execute('SELECT * FROM `{0}`'.format(name))
+			cur.execute('DELETE FROM `{0}`'.format(name))
 
 		print('Deleted all comments in', name)
 
 def stats():
 	for name in THREAD_NAMES:
-		if FILTER:
-			cur.execute('SELECT * FROM `stats_{0}` WHERE {1}(value)'.format(name, FILTER))
-		else:
-			cur.execute('SELECT * FROM `stats_{}`'.format(name))
+		cur.execute('SELECT * FROM `stats_{}` ORDER BY counts DESC'.format(name))
 		
 		table = cur.fetchall()
-		new_table = sorted(table, key=lambda n: n[1], reverse=True)
 		
-		with open('stats.txt', 'w') as file:
+		with open('stats.md', 'w') as file:
 			file.write('Rank|Username|Counts\n'
 				'---|---|---\n')
 			
 			n = 1
-			for row in new_table:
+			for row in table:
 				file.write(' | '.join([str(n), row[0], str(row[1])]) + '\n')
 				n += 1
+			
+			file.write('\nDate completed: {} UTC'.format(datetime.now()))
 			
 		print('Stats file written.')
 
