@@ -11,15 +11,56 @@ SUBREDDIT = 'counting'
 # Bot's useragent
 USERAGENT = 'Statistics for /r/counting by idunnowhy9000'
 # List of thread names, you can add or remove threads to track
-THREAD_NAMES = ['main']
+THREAD_NAME = 'main'
 # Base regex for base 10 threads
 BASE_REGEX = r'^\W*(\d+(\W*\d+)*|\d+)'
+
+class Thread(object):
+	
+	def __init__(self, search='', tid=False, regex=BASE_REGEX, base=10, group=0, flags=0):
+		self.search = search
+		self.tid = tid
+		self.base = base
+		
+		self.group = group
+		self.flags = flags
+		self.regex = re.compile(regex, flags=flags)
+		
+		self.threads = []
+	
+	def match(self, text):
+		return self.regex.match(text)
+	
+	def parse(self, matches):
+		if self.base:
+			return int(re.sub(r'\W', '', matches.group(self.group)), self.base)
+		else:
+			return re.sub(r'\W', '', matches.group(self.group))
+	
+	def search_thread(self, r):
+		threads = []
+		if self.tid:
+			if type(self.tid) == list:
+				for id in self.tid:
+					threads.append(r.get_submission(submission_id=id))
+			else:
+				threads.append(r.get_submission(submission_id=self.tid))
+		else:
+			for search in subreddit.search(self.search, sort='new'):
+				tid = search.id
+				if tid in self.exception:
+					continue
+					
+				threads.append(search)
+			
+		return threads
+
 # Thread options
 THREAD_OPTIONS = {
 	'main': {
 		'search': 'title:Counting Thread',
 		'regex': BASE_REGEX,
-		'tid': ['3xe8fa']
+		'tid': ['3xeq9m']
 	},
 	'alphanumeric': {
 		'search': 'title:Alphanumerics',
@@ -61,7 +102,8 @@ THREAD_OPTIONS = {
 	},
 	'ternary': {
 		'search': 'title:ternary counting thread',
-		'regex': r'^\W*([012,\.\s]+)'
+		'regex': r'^\W*([012,\.\s]+)',
+		'tid': ['3unkpu']
 	},
 	'roman': {
 		'tid': '3smutv',
@@ -77,59 +119,11 @@ THREAD_OPTIONS = {
 		'regex':'^\W*(gr\W*\d+\W*b\W*\d+\W*m\W*\d+)',
 		'tid': '3mwb6g',
 		'flags': re.I
-	},
-	
-	'text': {
-		'regex': '^\W*(?:\d+(?:\W*\d+\W*)*|\d+)?([^\d](?:.|\n)*)$',
 	}
 }
-# Parser maker
-def make_parser(group=0, base=None):
-	if type(base) == int:
-		return lambda matches: int(re.sub(r'\W', '', matches.group(group)), base)
-	return lambda matches: re.sub(r'\W', '', matches.group(group))
 
-# Number parser for side threads
-def PARSER_palindrome(matches):
-	str = re.sub(r'\W', '', matches.group(0))
-	if str != str[::-1]:
-		print('Warning:', str, 'is not a palindrome')
-	return str
-
-THREAD_OPTIONS['palindrome']['parser'] = PARSER_palindrome
-
-def PARSER_phexadecimal(matches):
-	str = re.sub(r'\W', '', matches.group(0))
-	if str != str[::-1]:
-		print('Warning:', str, 'is not a palindrome')
-	return str
-THREAD_OPTIONS['palindrome-hex']['parser'] = PARSER_phexadecimal
-
-def PARSER_time(matches):
-	hour = int(re.sub(r'\W', '', matches.group(1)))
-	minute = int(re.sub(r'\W', '', matches.group(2)))
-	seconds = int(re.sub(r'\W', '', matches.group(3)))
-	return hour * 60 + minute * 60 + seconds
-
-THREAD_OPTIONS['time']['parser'] = PARSER_time
-
-THREAD_OPTIONS['gr8b8m8']['parser'] = make_parser()
-THREAD_OPTIONS['12345']['parser'] = make_parser(1, 10)
-THREAD_OPTIONS['fourfours']['parser'] = make_parser(1, 10)
-THREAD_OPTIONS['text']['parser'] = make_parser()
-THREAD_OPTIONS['hexadecimal']['parser'] = make_parser(0, 16)
-THREAD_OPTIONS['alphanumeric']['parser'] = make_parser()
-THREAD_OPTIONS['binary']['parser'] = make_parser(0, 2)
-THREAD_OPTIONS['ternary']['parser'] = make_parser(0, 3)
-
-# Compile the regexes
-for key in THREAD_NAMES:
-	option = THREAD_OPTIONS[key]
-	flags = option['flags'] if 'flags' in option else 0
-	THREAD_OPTIONS[key]['compiled_regex'] = re.compile(THREAD_OPTIONS[key]['regex'], flags=flags)
-
-# Limit
-LIMIT = None
+# Compile classes
+THREAD = Thread(**THREAD_OPTIONS[THREAD_NAME])
 
 # Filter database
 FILTER = ''
@@ -147,12 +141,10 @@ sql.create_function('ends_69', 1, lambda n: n[::2])
 
 cur = sql.cursor()
 
-for key in THREAD_NAMES:
-	cur.execute('CREATE TABLE IF NOT EXISTS {}(id TEXT, value TEXT, author TEXT, time DATETIME)'.format(key))
-	cur.execute('CREATE TABLE IF NOT EXISTS stats_{}(author TEXT, counts INT)'.format(key))
+cur.execute('CREATE TABLE IF NOT EXISTS {}(id TEXT, value TEXT, author TEXT, time DATETIME)'.format(THREAD_NAME))
+cur.execute('CREATE TABLE IF NOT EXISTS stats_{}(author TEXT, counts INT)'.format(THREAD_NAME))
 
-def replybot():
-	
+def setup_reddit():
 	# Good to go
 	r = praw.Reddit(USERAGENT)
 
@@ -161,61 +153,22 @@ def replybot():
 		r.login(login.USERNAME, login.PASSWORD)
 	except ImportError:
 		pass
+	
+	return r
 
-	subreddit = r.get_subreddit(SUBREDDIT)
-
-	threads = []
-	for key in THREAD_NAMES:
-		base = THREAD_OPTIONS[key]
-		submission = None
-		submissions = []
-		
-		if 'tid' in base:
-			if type(base['tid']) == list:
-				for id in base['tid']:
-					submissions.append({
-						'thread': r.get_submission(submission_id=id),
-						'type': key
-					})
-			else:
-				submission = r.get_submission(submission_id=base['tid'])
-		else:
-			do = 'except' in base
-			for search in subreddit.search(base['search'], sort='new'):
-				tid = search.id
-				if do and tid in base['except']:
-					continue
-				
-				submissions.append({
-					'thread': search,
-					'type': key
-				})
-		
-		if submission:
-			threads.append({
-				'thread': submission,
-				'type': key
-			})
-		elif submissions:
-			threads.extend(submissions)
-
-	print(threads)
+def replybot():
+	threads = THREAD.search_thread(setup_reddit())
 	
 	for thread in threads:
 		_max = -inf
 		_min = inf
 		
 		valid = bad = skipped = deleted = 0
-		authorsByValues = missing = {}
+		authorsByValues = {}
 		duplicates = []
 		
-		name = thread['type']
-		option = THREAD_OPTIONS[name]
-		
-		post = thread['thread']
-		comments = post.comments
-		
-		print(post)
+		print(thread)
+		comments = thread.comments
 		
 		for comment in comments:
 			
@@ -237,12 +190,12 @@ def replybot():
 				deleted += 1
 				continue
 			
-			cur.execute('SELECT * FROM `{}` WHERE ID=?'.format(key), [pid])
+			cur.execute('SELECT * FROM `{}` WHERE ID=?'.format(THREAD_NAME), [pid])
 			if cur.fetchone():
 				# Post is already in the database
 				continue
 			
-			matches = option['compiled_regex'].match(pbody)
+			matches = THREAD.match(pbody)
 				
 			if not matches:
 				skipped += 1
@@ -250,16 +203,13 @@ def replybot():
 				continue
 			
 			try:
-				if 'parser' in option:
-					val = option['parser'](matches)
-				else:
-					val = int(re.sub(r'\W', '', matches.group(0)))
+				val = THREAD.parse(matches)
 			except ValueError as e:
 				bad += 1
 				print(e)
 				continue
 			
-			cur.execute('SELECT * FROM `{}` WHERE value=?'.format(key), [val])
+			cur.execute('SELECT * FROM `{}` WHERE value=?'.format(THREAD_NAME), [val])
 			if (val in authorsByValues) or cur.fetchone():
 				duplicates.append({
 					'value': val,
@@ -270,7 +220,7 @@ def replybot():
 			
 			valid += 1
 			authorsByValues[val] = {
-				'key': key,
+				'key': THREAD_NAME,
 				'pid': pid,
 				'value': val,
 				'author': pauthor,
@@ -280,149 +230,141 @@ def replybot():
 		print('Comment proccessed:', len(comments))
 		print('Valid comments:', valid)
 		print('Bad comments:', bad)
-		print('Missing comments:', len(missing))
 		print('Duplicated comments:', len(duplicates))
 		print('Deleted comments:', deleted)
 	
 		print('Saving....')
 		for key, value in authorsByValues.items():
 			if type(value) != dict: continue
-			cur.execute('INSERT INTO `{}` VALUES(:pid,:value,:author,:created)'.format(name), value)
+			cur.execute('INSERT INTO `{}` VALUES(:pid,:value,:author,:created)'.format(THREAD_NAME), value)
 		
 		sql.commit()
 
 def contrib():
-	for name in THREAD_NAMES:
-		query = ('SELECT t1.value, t1.author, round(86400*(julianday(t1.time)-julianday(t2.time))) AS diff'
-				' FROM {0} t1, {0} t2'
-				' WHERE t2.value = t1.value - 1'
-				' AND diff > 0').format(name)
+	query = ('SELECT t1.value, t1.author, round(86400*(julianday(t1.time)-julianday(t2.time))) AS diff'
+			' FROM {0} t1, {0} t2'
+			' WHERE t2.value = t1.value - 1'
+			' AND diff > 0').format(THREAD_NAME)
 		
-		if FILTER:
-			query += ' AND ' + FILTER + '(t1.value)'
+	if FILTER:
+		query += ' AND ' + FILTER + '(t1.value)'
 		
-		cur.execute(query)
-		print('Contributions in', name)
+	cur.execute(query)
+	print('Contributions in', THREAD_NAME)
 		
-		totals = {}
-		table = cur.fetchall()
+	totals = {}
+	table = cur.fetchall()
 		
-		if not table:
-			print('Table', name, 'is empty.')
-			continue
+	if not table:
+		print('Table', THREAD_NAME, 'is empty.')
+		return
 		
-		for row in table:
-			if row[1] in totals:
-				totals[row[1]]['counts'] += 1
-			else:
-				totals[row[1]] = {'counts': 1, 'seconds': {}}
-			
-			s = int(row[2])
-			if s == 3:
-				# Filter <2000 users
-				cur.execute(('SELECT author FROM stats_{} WHERE counts > 2000').format(name))
-				author = cur.fetchone()
+	for row in table:
+		if row[1] in totals:
+			totals[row[1]]['counts'] += 1
+		else:
+			totals[row[1]] = {'counts': 1, 'seconds': {}}
+		
+		s = int(row[2])
+		if s == 3:
+			# Filter <2000 users
+			cur.execute(('SELECT author FROM stats_{} WHERE counts > 2000').format(THREAD_NAME))
+			author = cur.fetchone()
 				
-				if author and row[1] == author:
-					continue
+			if author and row[1] == author:
+				continue
 
-			if s < 3:
-				if s in totals[row[1]]['seconds']:
-					totals[row[1]]['seconds'][s] += 1
-				else:
-					totals[row[1]]['seconds'][s] = 1
+		if s < 3:
+			if s in totals[row[1]]['seconds']:
+				totals[row[1]]['seconds'][s] += 1
+			else:
+				totals[row[1]]['seconds'][s] = 1
 		
-		new_dict = sorted(totals.items(), key=lambda x: x[1]['counts'], reverse=True)
+	new_dict = sorted(totals.items(), key=lambda x: x[1]['counts'], reverse=True)
 		
-		n = 1
-		print('Rank|Username|Counts\n'
-			'---|---|---')
-		for k, v in new_dict:
-			name = k
-			value = v['counts']
+	n = 1
+	print('Rank|Username|Counts\n'
+		'---|---|---')
+	for k, v in new_dict:
+		name = k
+		value = v['counts']
+		
+		if v['seconds']:
+			name += ' (' + ','.join([('{0} {1}s').format(v, k) for k, v in v['seconds'].items()]) + ')'
 			
-			if v['seconds']:
-				name += ' (' + ','.join([('{0} {1}s').format(v, k) for k, v in v['seconds'].items()]) + ')'
-			
-			print(n, '|', name, '|', value)
-			n += 1
+		print(n, '|', name, '|', value)
+		n += 1
 
 def dump():
 	from operator import itemgetter
-	for name in THREAD_NAMES:
-		query = 'SELECT * FROM `{0}`'.format(name)
+	query = 'SELECT * FROM `{0}`'.format(THREAD_NAME)
 		
-		if FILTER:
-			query += (' WHERE {}(value)'.format(FILTER))
+	if FILTER:
+		query += (' WHERE {}(value)'.format(FILTER))
+	
+	query += ' ORDER BY value'
+	cur.execute(query)
+	
+	filename = THREAD_NAME + '.txt'
+	table = cur.fetchall()
 		
-		query += ' ORDER BY value'
-		cur.execute(query)
-		
-		filename = name + '.txt'
-		table = cur.fetchall()
-		
-		with open(filename, 'w') as file:
-			for row in table:
-				file.write(str(row) + '\n')
+	with open(filename, 'w') as file:
+		for row in table:
+			file.write(str(row) + '\n')
 
 def clean():
-	for name in THREAD_NAMES:
-		if FILTER:
-			cur.execute('DELETE FROM `{0}` WHERE {1}(value)'.format(name, FILTER))
-		else:
-			cur.execute('DELETE FROM `{0}`'.format(name))
+	if FILTER:
+		cur.execute('DELETE FROM `{0}` WHERE {1}(value)'.format(THREAD_NAME, FILTER))
+	else:
+		cur.execute('DELETE FROM `{0}`'.format(THREAD_NAME))
 
-		print('Deleted all comments in', name)
+	print('Deleted all comments in', THREAD_NAME)
 
 def stats():
-	for name in THREAD_NAMES:
-		cur.execute('SELECT * FROM `stats_{}` ORDER BY counts DESC'.format(name))
+	cur.execute('SELECT * FROM `stats_{}` ORDER BY counts DESC'.format(THREAD_NAME))
 		
-		table = cur.fetchall()
+	table = cur.fetchall()
 		
-		with open('stats.md', 'w') as file:
-			file.write('Rank|Username|Counts\n'
-				'---|---|---\n')
+	with open('stats.md', 'w') as file:
+		file.write('Rank|Username|Counts\n'
+			'---|---|---\n')
 			
-			n = 1
-			for row in table:
-				file.write(' | '.join([str(n), row[0], str(row[1])]) + '\n')
-				n += 1
+		n = 1
+		for row in table:
+			file.write(' | '.join([str(n), row[0], str(row[1])]) + '\n')
+			n += 1
 			
-			file.write('\nDate completed: {} UTC'.format(datetime.now()))
-			
-		print('Stats file written.')
+		file.write('\nDate completed: {} UTC'.format(datetime.now()))
+		
+	print('Stats file written.')
 
 def update_stats():
-	for name in THREAD_NAMES:
-		if FILTER:
-			cur.execute('SELECT * FROM `{0}` WHERE {1}(value)'.format(name, FILTER))
+	if FILTER:
+		cur.execute('SELECT * FROM `{0}` WHERE {1}(value)'.format(THREAD_NAME, FILTER))
+	else:
+		cur.execute('SELECT * FROM `{0}`'.format(THREAD_NAME))
+	
+	table = cur.fetchall()
+	
+	for row in table:
+		author = row[2]
+
+		cur.execute('SELECT * FROM stats_{} WHERE author=?'.format(THREAD_NAME), [author])
+		result = cur.fetchone()
+
+		if result:
+			counts = result[1]
 		else:
-			cur.execute('SELECT * FROM `{0}`'.format(name))
+			cur.execute('INSERT INTO stats_{} VALUES(?, 0)'.format(THREAD_NAME), [author])
+			counts = 0
 		
-		table = cur.fetchall()
-		
-		for row in table:
-			author = row[2]
-
-			cur.execute('SELECT * FROM stats_{} WHERE author=?'.format(name), [author])
-			result = cur.fetchone()
-
-			if result:
-				counts = result[1]
-			else:
-				cur.execute('INSERT INTO stats_{} VALUES(?, 0)'.format(name), [author])
-				counts = 0
-				
-			print('Updating', author)
-			cur.execute('UPDATE stats_{} SET counts=? WHERE author=?'.format(name), [counts + 1, author])
-		
+		cur.execute('UPDATE stats_{} SET counts=? WHERE author=?'.format(THREAD_NAME), [counts + 1, author])
 		sql.commit()
 
 def main():
 	parser = argparse.ArgumentParser(description='Process counting statistics.')
 	
-	parser.add_argument('-T', '--threads', help='add or remove threads to track', action='append')
+	parser.add_argument('-T', '--thread', help='select thread to crawl', action='store')
 	parser.add_argument('-F', '--filter', help='set filter threads in database', action='store')
 	parser.add_argument('-L', '--limit', help='limit 1000 counts starting from n.', action='store', type=int)
 	
@@ -435,9 +377,10 @@ def main():
 	
 	args = parser.parse_args()
 	
-	global THREAD_NAMES, FILTER, LIMIT
-	if args.threads:
-		THREAD_NAMES = args.threads
+	global THREAD_NAME, FILTER, LIMIT
+	if args.thread:
+		THREAD_NAME = args.thread
+		THREAD = Thread(**THREAD_OPTIONS[THREAD_NAME])
 	if args.filter:
 		FILTER = args.filter
 	if args.limit:
