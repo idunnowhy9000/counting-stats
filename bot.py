@@ -17,7 +17,7 @@ BASE_REGEX = r'^\W*(\d+(\W*\d+)*|\d+)'
 
 class Thread(object):
 	
-	def __init__(self, search='', tid=False, regex=BASE_REGEX, base=10, group=0, flags=0):
+	def __init__(self, search='', tid=False, regex=BASE_REGEX, base=10, group=0, flags=0, check=None):
 		self.search = search
 		self.tid = tid
 		self.base = base
@@ -59,16 +59,15 @@ class Thread(object):
 THREAD_OPTIONS = {
 	'main': {
 		'search': 'title:Counting Thread',
-		'regex': BASE_REGEX,
-		'tid': ['3xeq9m']
+		'tid': ['3xiune']
 	},
 	'alphanumeric': {
 		'search': 'title:Alphanumerics',
-		'regex': '^\W*([0-9A-Z]+)'
+		'regex': '^\W*([0-9A-Z]+)',
+		'base': 36
 	},
 	'sheep':{
 		'search':'title:Sheep',
-		'regex': BASE_REGEX,
 		'tid': ['3tipxx', '3fzm7p', '3pydtg']
 	},
 	'letters': {
@@ -81,16 +80,17 @@ THREAD_OPTIONS = {
 	},
 	'palindrome': {
 		'search':'title:palindrome NOT (title:hexadecimal OR title:hex OR title:binary)',
-		'regex': BASE_REGEX,
 		'tid': ['3ujvpp']
 	},
 	'hexadecimal': {
 		'search':'(title:hexadecimal OR title:hex) NOT title:palindrome',
-		'regex': r'^\W*(?:0[xX])?([0-9a-fA-F]+)'
+		'regex': r'^\W*(?:0[xX])?([0-9a-fA-F]+)',
+		'base': 16
 	},
 	'palindrome-hex': {
 		'search':'title:hexadecimal palindrome OR title:hex palindrome',
-		'regex': r'^\W*(?:0[xX])?([0-9a-fA-F]+)'
+		'regex': r'^\W*(?:0[xX])?([0-9a-fA-F]+)',
+		'base': 16
 	},
 	'time': {
 		'search':'title:time counting thread',
@@ -98,12 +98,14 @@ THREAD_OPTIONS = {
 	},
 	'binary': {
 		'search': 'title:binary NOT title:palindrome',
-		'regex': r'^\W*([01,\.\s]+)'
+		'regex': r'^\W*([01,\.\s]+)',
+		'base': 2
 	},
 	'ternary': {
 		'search': 'title:ternary counting thread',
 		'regex': r'^\W*([012,\.\s]+)',
-		'tid': ['3unkpu']
+		'tid': ['3unkpu'],
+		'base': 3
 	},
 	'roman': {
 		'tid': '3smutv',
@@ -111,13 +113,16 @@ THREAD_OPTIONS = {
 	},
 	'12345': {
 		'regex': '^(\D*1\D*2\D*3\D*4\D*5\D*)(=\W*\d+(\W*\d+)*|\d+)?',
+		'group': 2
 	},
 	'fourfours': {
 		'regex': '^(\D*4){4}\D*=\W*(\d+(\W*\d+)*|\d+)',
+		'group': 2
 	},
 	'gr8b8m8': {
 		'regex':'^\W*(gr\W*\d+\W*b\W*\d+\W*m\W*\d+)',
 		'tid': '3mwb6g',
+		'group': 1,
 		'flags': re.I
 	}
 }
@@ -203,26 +208,26 @@ def replybot():
 				continue
 			
 			try:
-				val = THREAD.parse(matches)
+				value = THREAD.parse(matches)
 			except ValueError as e:
 				bad += 1
 				print(e)
 				continue
 			
-			cur.execute('SELECT * FROM `{}` WHERE value=?'.format(THREAD_NAME), [val])
-			if (val in authorsByValues) or cur.fetchone():
+			cur.execute('SELECT * FROM `{}` WHERE value=?'.format(THREAD_NAME), [value])
+			if (value in authorsByValues) or cur.fetchone():
 				duplicates.append({
-					'value': val,
+					'value': value,
 					'pid': pid,
 					'author': pauthor
 				})
 				continue
 			
 			valid += 1
-			authorsByValues[val] = {
+			authorsByValues[value] = {
 				'key': THREAD_NAME,
 				'pid': pid,
-				'value': val,
+				'value': value,
 				'author': pauthor,
 				'created': datetime.fromtimestamp(pdate)
 			}
@@ -241,7 +246,8 @@ def replybot():
 		sql.commit()
 
 def contrib():
-	query = ('SELECT t1.value, t1.author, round(86400*(julianday(t1.time)-julianday(t2.time))) AS diff'
+	query = ('SELECT t1.value, t1.author,'
+			' round(86400*(julianday(t1.time)-julianday(t2.time))) AS diff'
 			' FROM {0} t1, {0} t2'
 			' WHERE t2.value = t1.value - 1'
 			' AND diff > 0').format(THREAD_NAME)
@@ -254,11 +260,11 @@ def contrib():
 		
 	totals = {}
 	table = cur.fetchall()
-		
+
 	if not table:
 		print('Table', THREAD_NAME, 'is empty.')
 		return
-		
+	
 	for row in table:
 		if row[1] in totals:
 			totals[row[1]]['counts'] += 1
@@ -294,7 +300,7 @@ def contrib():
 			
 		print(n, '|', name, '|', value)
 		n += 1
-
+	
 def dump():
 	from operator import itemgetter
 	query = 'SELECT * FROM `{0}`'.format(THREAD_NAME)
@@ -317,7 +323,7 @@ def clean():
 		cur.execute('DELETE FROM `{0}` WHERE {1}(value)'.format(THREAD_NAME, FILTER))
 	else:
 		cur.execute('DELETE FROM `{0}`'.format(THREAD_NAME))
-
+	sql.commit()
 	print('Deleted all comments in', THREAD_NAME)
 
 def stats():
