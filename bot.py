@@ -1,18 +1,16 @@
 ﻿import praw
-from praw.helpers import flatten_tree
 import re
 import sqlite3
 from datetime import datetime
 import argparse
 from math import floor
-from collections import Counter
 
 # Counting subreddit
 SUBREDDIT = 'counting'
 # Bot's useragent
 USERAGENT = 'Statistics for /r/counting by idunnowhy9000'
 # List of thread names, you can add or remove threads to track
-THREAD_NAME = 'sheep'
+THREAD_NAME = 'main'
 # Base regex for base 10 threads
 BASE_REGEX = r'^\W*(\d+(\W*\d+)*|\d+)'
 
@@ -23,7 +21,7 @@ class Thread(object):
 		
 		self.search = options['search'] if 'search' in options else False
 		self.tid = options['tid'] if 'tid' in options else False
-		self.exception = options['exception'] if 'exception' in options else False
+		self.exception = options['exception'] if 'exception' in options else []
 		
 		self.base = options['base'] if 'base' in options else 10
 		self.group = options['group'] if 'group' in options else 0
@@ -41,7 +39,8 @@ class Thread(object):
 		return self.regex.match(text)
 	
 	def parse(self, matches):
-		return int(re.sub(r'\W', '', matches.group(self.group)), self.base)
+		value = re.sub(r'\W', '', matches.group(self.group))
+		return int(value, self.base)
 	
 	def search_thread(self, r):
 		threads = []
@@ -108,8 +107,25 @@ THREAD_OPTIONS = {
 		'parse': lambda matches: matches.group(0) * 3600 + matches.group(1) * 60 + matches.group(2)
 	},
 	'binary': {
-		'search': 'title:binary NOT (title:palindrome OR title:alphabet OR title:prime)',
+		'search': 'title:binary NOT (title:palindrome OR title:alphabet OR title:prime OR title:collatz)',
 		'regex': r'^\W*([01,\.\s]+)',
+		'tid': [
+			'2bz9af',
+			'2ayln3',
+			'27v2uz',
+			'23yj8b',
+			'2114au',
+			'1ynh3x',
+			'1tsdch',
+			'1qkila',
+			'1n2o88',
+			'1l05w8',
+			'1jezs3',
+			'1i1szs',
+			'1g8kn3',
+			'ziv8h',
+			'uuz0l'
+		],
 		'base': 2
 	},
 	'ternary': {
@@ -189,7 +205,6 @@ def replybot():
 				comments.extend(comment.comments())
 				continue
 			
-			# Extend comments with replies for loop
 			comments.extend(comment.replies)
 			
 			pid = comment.id
@@ -203,7 +218,7 @@ def replybot():
 				deleted += 1
 				continue
 			
-			cur.execute('SELECT * FROM `{}` WHERE ID=?'.format(thread.name), [pid])
+			cur.execute('SELECT 1 FROM `{}` WHERE ID=?'.format(thread.name), [pid])
 			if cur.fetchone():
 				# Post is already in the database
 				continue
@@ -212,20 +227,18 @@ def replybot():
 				
 			if not matches:
 				skipped += 1
-				#print('Skipped:', pbody.encode('utf8'))
-			else:
 				print('Skipped:', pbody.encode('utf8'))
 				continue
-			value = pbody
+			#value = pbody
 			
-			#try:
-			#	value = thread.parse(matches)
-			#except ValueError as e:
-			#	bad += 1
-			#	print(e)
-			#	continue
+			try:
+				value = thread.parse(matches)
+			except ValueError as e:
+				bad += 1
+				print(e)
+				continue
 			
-			cur.execute('SELECT * FROM `{}` WHERE value=?'.format(thread.name), [value])
+			cur.execute('SELECT 1 FROM `{}` WHERE value=?'.format(thread.name), [value])
 			if (value in authorsByValues) or cur.fetchone():
 				duplicates += 1
 				continue
@@ -254,6 +267,8 @@ def replybot():
 
 def contrib():
 	""" Dump thread's contribution """
+	from collections import Counter, defaultdict
+	
 	query = ('SELECT t1.parsed, t1.author,'
 			' round(86400*(julianday(t1.time)-julianday(t2.time))) AS diff'
 			' FROM `{0}` t1, `{0}` t2'
@@ -268,7 +283,7 @@ def contrib():
 		
 	table = cur.fetchall()
 	counts = Counter()
-	seconds = {}
+	seconds = defaultdict(Counter)
 
 	if not table:
 		print('Table', thread.name, 'is empty.')
@@ -281,18 +296,14 @@ def contrib():
 		s = int(row[2])
 		if s == 3:
 			# Filter <2000 users
-			cur.execute(('SELECT author FROM `stats_{}` WHERE counts > 2000').format(thread.name))
-			author = cur.fetchone()
+			cur.execute(('SELECT 1 FROM `stats_{}` WHERE counts > 2000 AND author=?').format(thread.name), author)
+			result = cur.fetchone()
 				
-			if author and row[1] == author:
+			if result:
 				continue
 
 		if s < 3:
-			if author in seconds:
-				seconds[author][s] += 1
-			else:
-				seconds[author] = Counter()
-				seconds[author][s] = 1
+			seconds[author][s] += 1
 
 	n = 1
 	print('Rank|Username|Counts\n'
@@ -328,6 +339,9 @@ def dump():
 
 def clean():
 	""" Delete database files """
+	if input('Are you really sure to clean database?').lower() == 'y':
+		return
+	
 	if FILTER:
 		cur.execute('DELETE FROM `{0}` WHERE {1}(value)'.format(thread.name, FILTER))
 	else:
