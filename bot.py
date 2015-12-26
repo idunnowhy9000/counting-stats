@@ -3,35 +3,39 @@ import re
 import sqlite3
 from datetime import datetime
 import argparse
-from math import floor
 
 # Counting subreddit
 SUBREDDIT = 'counting'
 # Bot's useragent
 USERAGENT = 'Statistics for /r/counting by idunnowhy9000'
 # List of thread names, you can add or remove threads to track
-THREAD_NAME = 'main'
+THREAD_NAME = 'hexadecimal'
 # Base regex for base 10 threads
 BASE_REGEX = r'^\W*(\d+(\W*\d+)*|\d+)'
 
 class Thread(object):
 	
-	def __init__(self, name, options):
+	def __init__(self,
+		name='NoName',
+		search=False, tid=False, exception=[], ignoreDupes=False,
+		base=10, group=0, flags=0, regex=BASE_REGEX, parse=False):
+		
 		self.name = name
 		
-		self.search = options['search'] if 'search' in options else False
-		self.tid = options['tid'] if 'tid' in options else False
-		self.exception = options['exception'] if 'exception' in options else []
+		self.search = search
+		self.tid = tid
+		self.exception = exception
+		self.ignoreDupes = ignoreDupes
 		
-		self.base = options['base'] if 'base' in options else 10
-		self.group = options['group'] if 'group' in options else 0
-		self.flags = options['flags'] if 'flags' in options else 0
-		self.regex = re.compile((options['regex'] if 'regex' in options else BASE_REGEX), flags=self.flags)
+		self.base = base
+		self.group = group
+		self.flags = flags
+		self.regex = re.compile(regex, flags=flags)
 		
 		self.threads = []
 		
-		if 'parse' in options and callable(options['parse']):
-			self.parse = lambda m: options['parse'](m)
+		if parse and callable(parse):
+			self.parse = parse
 		
 		cur.execute('CREATE TABLE IF NOT EXISTS `{}`(id TEXT, value TEXT, parsed TEXT, author TEXT, time DATETIME, tid TEXT)'.format(name))
 	
@@ -39,8 +43,7 @@ class Thread(object):
 		return self.regex.match(text)
 	
 	def parse(self, matches):
-		value = re.sub(r'\W', '', matches.group(self.group))
-		return int(value, self.base)
+		return int(re.sub(r'\W', '', matches.group(self.group)), self.base)
 	
 	def search_thread(self, r):
 		threads = []
@@ -69,8 +72,7 @@ THREAD_OPTIONS = {
 	'alphanumeric': {
 		'search': 'title:Alphanumerics',
 		'regex': '^\W*([0-9A-Z]+)',
-		'tid': ['3je4es'],
-		'parse': lambda matches: matches.group(0),
+		'tid': ['3je4es']
 	},
 	'sheep':{
 		'search':'title:Sheep',
@@ -82,18 +84,18 @@ THREAD_OPTIONS = {
 	},
 	'updown': {
 		'search':'((title:up down) OR (title:increment decrement) OR (title:tug of war)) NOT (title:2D)',
-		'regex': r'^([^\d-]*\W*-?(\d+(\W*\d+)*|\d+))',
-		'tid': ['3rwjeh', '3rstzg', '3rnxtp'],
-		'parse': lambda matches: re.sub(r'[^\d-]', '', matches.group(0))
+		'regex': r'^[^-\W]*((-\W*)?(\d+([^-\w]*\d+)*|\d+))',
+		'tid': ['3tiryi'],
+		'ignoreDupes': True
 	},
 	'palindrome': {
 		'search':'title:palindrome NOT (title:hexadecimal OR title:hex OR title:binary)',
-		'tid': ['3ujvpp'],
-		'parse': lambda matches: matches.group(0)[(len(matches.group(0)) / 2):] if len(matches.group(0)) % 2 == 0 else matches.group(0)[floor(len(matches.group(0)) / 2):]
+		'exception': ['3x5bcr']
 	},
 	'hexadecimal': {
 		'search':'(title:hexadecimal OR title:hex) NOT title:palindrome',
 		'regex': r'^\W*(?:0[xX])?([0-9a-fA-F]+)',
+		'tid': ['3w00h0'],
 		'base': 16
 	},
 	'palindrome-hex': {
@@ -104,28 +106,11 @@ THREAD_OPTIONS = {
 	'time': {
 		'search':'title:time counting thread',
 		'regex': r'^\W*(\d{1,2})\W*(\d{1,2})\W*(\d{1,2})\W*(AM|PM)?',
-		'parse': lambda matches: matches.group(0) * 3600 + matches.group(1) * 60 + matches.group(2)
+		'parse': lambda matches: int(matches.group(1)) * 3600 + int(matches.group(2)) * 60 + int(matches.group(3))
 	},
 	'binary': {
 		'search': 'title:binary NOT (title:palindrome OR title:alphabet OR title:prime OR title:collatz)',
 		'regex': r'^\W*([01,\.\s]+)',
-		'tid': [
-			'2bz9af',
-			'2ayln3',
-			'27v2uz',
-			'23yj8b',
-			'2114au',
-			'1ynh3x',
-			'1tsdch',
-			'1qkila',
-			'1n2o88',
-			'1l05w8',
-			'1jezs3',
-			'1i1szs',
-			'1g8kn3',
-			'ziv8h',
-			'uuz0l'
-		],
 		'base': 2
 	},
 	'ternary': {
@@ -142,18 +127,23 @@ THREAD_OPTIONS = {
 		'search': 'title:12345',
 		'regex': '^\W*((?:\D*1\D*2\D*3\D*4\D*5)(\D*=\W*(\d+(\W*\d+)*|\d+))?)',
 		'exception': ['3vzjuy'],
-		'parse': lambda matches: int(re.sub('\W', '', matches.group(3))) if matches.group(3) else matches.group(0)
+		'parse': lambda matches: re.sub('\W', '', matches.group(3)) if matches.group(3).isdigit() else matches.group(0)
 	},
 	'fourfours': {
 		'regex': '^\W*((?:\D*4){4}(\D*=\W*(\d+(\W*\d+)*|\d+))?)',
 		'tid': ['3109vi'],
-		'parse': lambda matches: int(re.sub('\W', '', matches.group(3))) if matches.group(3).isdigit() else matches.group(0)
+		'parse': lambda matches: re.sub('\W', '', matches.group(3)) if matches.group(3).isdigit() else matches.group(0)
 	},
 	'gr8b8m8': {
 		'regex':'^\W*(gr\W*\d+\W*b\W*\d+\W*m\W*\d+)',
 		'tid': '3mwb6g',
 		'group': 1,
 		'flags': re.I
+	},
+	'rational': {
+		'regex': '^\W*((?:\d*\W*\/\W*\d*\W*)*)?(\d*)\W*\/\W*(\d*)',
+		'search': 'title:rational',
+		'parse': lambda matches: int(matches.group(2)) / int(matches.group(3))
 	}
 }
 
@@ -162,18 +152,19 @@ FILTER = ''
 
 print('Opening SQL Database')
 sql = sqlite3.connect('sql.db', detect_types=sqlite3.PARSE_DECLTYPES)
+
 sql.create_function('contains_69', 1, lambda n: '69' in n)
-sql.create_function('ends_69', 1, lambda n: n[::2])
+sql.create_function('ends_69', 1, lambda n: n[-2:] == '69')
+sql.create_function('palindrome', 1, lambda n: n[::-1] == n)
 
 cur = sql.cursor()
 
 def setup_thread(name):
 	global thread
 	if name in THREAD_OPTIONS:
-		thread = Thread(name, THREAD_OPTIONS[name])
+		thread = Thread(name, **THREAD_OPTIONS[name])
 	else:
 		print('Option for', name, 'does not exist.')
-		exit()
 
 def setup_reddit():
 	# Good to go
@@ -197,7 +188,7 @@ def replybot():
 		authorsByValues = {}
 		
 		print(post)
-	
+
 		comments = post.comments
 		for comment in comments:
 			
@@ -238,10 +229,11 @@ def replybot():
 				print(e)
 				continue
 			
-			cur.execute('SELECT 1 FROM `{}` WHERE value=?'.format(thread.name), [value])
-			if (value in authorsByValues) or cur.fetchone():
-				duplicates += 1
-				continue
+			if not thread.ignoreDupes:
+				cur.execute('SELECT 1 FROM `{}` WHERE parsed=?'.format(thread.name), [value])
+				if (value in authorsByValues) or cur.fetchone():
+					duplicates += 1
+					continue
 			
 			valid += 1
 			authorsByValues[value] = {
@@ -264,6 +256,80 @@ def replybot():
 			cur.execute('INSERT INTO `{}` VALUES(:pid,:body,:value,:author,:created,:tid)'.format(thread.name), value)
 		
 		sql.commit()
+
+def gold():
+	""" Crawl gold comments """
+	r = setup_reddit()
+	subreddit = r.get_subreddit(SUBREDDIT)
+	gilded = subreddit.get_comments(limit=None, gilded_only=True)
+	
+	cur.execute('CREATE TABLE IF NOT EXISTS gold(id TEXT, body TEXT, author TEXT, time DATETIME, tid TEXT)')
+	for comment in gilded:
+		id = comment.id
+		cur.execute('SELECT 1 FROM gold WHERE ID=?', [id])
+		if cur.fetchone():
+			continue
+		
+		try:
+			author = comment.author.name
+			body = comment.body.strip()
+		except AttributeError:
+			author = '[deleted]'
+			body = '[deleted]'
+		
+		try:
+			tid = comment.submission.id
+		except AttributeError:
+			continue
+		
+		time = int(comment.created_utc)
+		
+		cur.execute('INSERT INTO gold VALUES(:id,:body,:author,:time,:tid)',
+		{
+			'author': author,
+			'body': body,
+			'id': id,
+			'tid': tid,
+			'time': datetime.fromtimestamp(time)
+		})
+		
+		print(id)
+	
+	sql.commit()
+
+def contrib_gold():
+	""" Dump gilded comments statistics """
+	from collections import Counter
+	
+	cur.execute('SELECT author FROM gold')
+	table = cur.fetchall()
+	
+	if not table:
+		print('Table gold is empty.')
+		exit()
+	
+	with open('stats_gilded.txt', 'w') as file:
+		file.write('Rank|Username|gold\n'
+				'---|---|---\n')
+		
+		counts = Counter()
+		for row in table:
+			author = row[0]
+			counts[author] += 1
+
+		print(counts)
+		
+		n = 1
+		for row in counts.most_common():
+			name = row[0]
+			value = row[1]
+			
+			file.write('|'.join([str(n), name, str(value)]) + '\n')
+			n += 1
+		
+		file.write('\nDate completed: {} UTC'.format(datetime.utcnow()))
+		
+		print('Stats file written.')
 
 def contrib():
 	""" Dump thread's contribution """
@@ -296,7 +362,7 @@ def contrib():
 		s = int(row[2])
 		if s == 3:
 			# Filter <2000 users
-			cur.execute(('SELECT 1 FROM `stats_{}` WHERE counts > 2000 AND author=?').format(thread.name), author)
+			cur.execute(('SELECT 1 FROM `stats_{}` WHERE counts > 2000 AND author=?').format(thread.name), [author])
 			result = cur.fetchone()
 				
 			if result:
@@ -325,7 +391,6 @@ def dump():
 	if FILTER:
 		query += (' WHERE {}(value)'.format(FILTER))
 	
-	query += ' ORDER BY value'
 	cur.execute(query)
 	
 	filename = thread.name + '.txt'
@@ -339,7 +404,7 @@ def dump():
 
 def clean():
 	""" Delete database files """
-	if input('Are you really sure to clean database?').lower() == 'y':
+	if input('Are you really sure to clean database?').lower() != 'y':
 		return
 	
 	if FILTER:
@@ -364,7 +429,7 @@ def stats():
 			file.write(' | '.join([str(n), row[0], str(row[1])]) + '\n')
 			n += 1
 			
-		file.write('\nDate completed: {} UTC'.format(datetime.now()))
+		file.write('\nDate completed: {} UTC'.format(datetime.utcnow()))
 		
 	print('Stats file written.')
 
@@ -373,7 +438,7 @@ def update_stats():
 	cur.execute('CREATE TABLE IF NOT EXISTS `stats_{}`(author TEXT, counts INT)'.format(thread.name))
 	
 	if FILTER:
-		cur.execute('SELECT author FROM `{0}` WHERE {1}(value)'.format(thread.name, FILTER))
+		cur.execute('SELECT author FROM `{0}` WHERE {1}(parsed)'.format(thread.name, FILTER))
 	else:
 		cur.execute('SELECT author FROM `{}`'.format(thread.name))
 	
@@ -429,22 +494,24 @@ def main():
 	parser.add_argument('-T', '--thread', help='select thread to crawl', action='store')
 	parser.add_argument('-F', '--filter', help='set filter threads in database', action='store')
 	parser.add_argument('-L', '--limit', help='limit 1000 counts starting from n.', action='store', type=int)
+	parser.add_argument('-G', '--gold', help='crawl all gilded comments', action='store_true')
 	
 	parser.add_argument('-Cl', '--clean', help='clean threads in database.', action='store_true')
-	parser.add_argument('-C', '--contrib', help='print contributions for threads in database.', action='store_true')
 	parser.add_argument('-D', '--dump', help='dump all threads in database', action='store_true')
 	
+	parser.add_argument('-C', '--contrib', help='print contributions for threads in database.', action='store_true')
 	parser.add_argument('-S', '--stats', help='display stats in database', action='store_true')
 	parser.add_argument('-Su', '--stats-update', help='update stats in database', action='store_true')
 	
-	parser.add_argument('-Ca', '--convert-asa', help="converts anothershittyalt's format to this format", action='store')
+	parser.add_argument('-Ca', '--convert-asa', help="converts anothershittyalt's format to SQL format", action='store')
 	
 	args = parser.parse_args()
 	
 	if args.thread:
-		setup_thread(args.thread)
-	else:
-		setup_thread(THREAD_NAME)
+		global THREAD_NAME
+		THREAD_NAME = args.thread
+	
+	setup_thread(THREAD_NAME)
 	
 	global FILTER
 	if args.filter:
@@ -460,11 +527,16 @@ def main():
 	
 	if args.clean:
 		clean()
-	elif args.contrib:
-		contrib()
 	elif args.dump:
 		dump()
 	
+	elif (args.contrib or args.stats) and (args.gold or THREAD_NAME == 'gold'):
+		contrib_gold()
+	elif args.gold or THREAD_NAME == 'gold':
+		gold()
+	
+	elif args.contrib:
+		contrib()
 	elif args.stats:
 		stats()
 	elif args.stats_update:
